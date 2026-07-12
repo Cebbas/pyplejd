@@ -124,20 +124,10 @@ class PlejdMesh:
                     max_attempts=2,
                 )
 
-                # Workaround for problem in plejd firmware 2026-05-20
-                # Disconnect and connect again
-                _CONNECTION_LOG.debug(
-                    "BT Proxy workaround - Disconnecting for 5 seconds."
-                )
-                await client.disconnect()
-                await asyncio.sleep(5)
-                _CONNECTION_LOG.debug("BT Proxy workaround - Reconnecting")
-                client = await establish_connection(
-                    BleakClientWithServiceCache,
-                    node.bleDevice,
-                    node.bleDevice.name,
-                    _disconnect,
-                )
+                # Disabled local test patch:
+                # The double-connect workaround can destabilize newer Plejd firmware.
+                # Use the first established connection directly and attach the disconnect callback.
+                client.set_disconnected_callback(_disconnect)
 
                 if not await self._authenticate(client):
                     await client.disconnect()
