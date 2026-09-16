@@ -88,7 +88,22 @@ class PlejdMesh:
 
     @property
     def connected(self):
-        return self._client is not None
+        # Some gateway devices drop the BLE link without ever firing
+        # bleak's disconnect callback, so `_client` stays a non-None,
+        # stale object indefinitely - `connect()` reads this property at
+        # entry and, seeing it True, skips reconnecting entirely, so
+        # every subsequent write/ping just hangs or fails against a dead
+        # link until something (a restart, a manual integration reload)
+        # forces a fresh connection. Checking bleak's own is_connected
+        # catches that: a dead client clears itself here so the next
+        # connect() call actually reconnects instead of trusting a
+        # connection that's already gone.
+        if self._client is None:
+            return False
+        if not self._client.is_connected:
+            self._client = None
+            return False
+        return True
 
     def expect_device(self, node: MeshDevice = None):
         self._mesh_devices[node.BLEaddress] = node
