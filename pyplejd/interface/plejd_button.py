@@ -17,6 +17,22 @@ from ..ble.debug import rec_log
 # those.
 LONG_PRESS_THRESHOLD = 0.5
 
+# Confirmed live 2026-10-07 against a real WPH-01-LC battery remote:
+# its CMD_EVENT_FIRED payload for a press is 5 bytes (not the usual 3),
+# and it never sends a second packet at all - no release, no
+# repeat-while-held signal, regardless of how long the button is
+# actually held (tested up to ~11s, exactly one packet every time).
+# There is genuinely no information on the wire to tell a quick tap
+# from a long hold on this hardware, so our normal "timeout with no
+# release -> long_press" fallback would be actively wrong for it: a
+# completely ordinary quick tap would always come out as long_press,
+# every single time. For hardware in this set, report single_press
+# once the timeout passes instead, and still fire our own synthetic
+# release right after so the entity settles back to its normal resting
+# state - the real release packet will never come, so nothing else
+# ever would.
+NEVER_RELEASES_HARDWARE = ("WPH-01-LC",)
+
 
 class PlejdButton(PlejdInput):
 
@@ -30,6 +46,10 @@ class PlejdButton(PlejdInput):
     @property
     def button_id(self):
         return self.settings.input
+
+    @property
+    def _no_release_hardware(self):
+        return self.hardware in NEVER_RELEASES_HARDWARE
 
     def _notify(self, button, action, click_type):
         rec_log(f"BUTTON button={button} {action=} {click_type=}", self.address)
@@ -45,6 +65,15 @@ class PlejdButton(PlejdInput):
 
     def _long_press_timeout(self, button):
         self._cancel_long_press_timer = lambda: None
+        self._press_time = None
+        if self._no_release_hardware:
+            # No second packet will ever arrive for this hardware - see
+            # NEVER_RELEASES_HARDWARE above. Report the only thing we
+            # can actually know (a press happened) as single_press, and
+            # immediately settle to release since the real one never
+            # comes.
+            self._notify(button, "release", "single_press")
+            return
         self._long_press_fired = True
         self._notify(button, "long_press", "long_press")
 
@@ -78,7 +107,7 @@ class PlejdButton(PlejdInput):
                     # surfaced there.
                     return
 
-                # action == "release"
+                # action == "release" (hardware that does send one)
                 click_type = None
                 if self._long_press_fired:
                     # Already reported as long_press via the timeout -
